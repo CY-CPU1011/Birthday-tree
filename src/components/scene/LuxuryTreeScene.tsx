@@ -754,6 +754,8 @@ function PolaroidOrnaments({
     [layout.polaroids.length, uploadedPhotos],
   );
   const selectedIndexRef = useRef<number | null>(null);
+  const lastPinchingRef = useRef(false);
+  const nextGrabIndexRef = useRef(0);
   const positions = useRef(
     layout.polaroids.map((seed) => new THREE.Vector3(...seed.chaosPosition)),
   );
@@ -765,7 +767,6 @@ function PolaroidOrnaments({
   const tempTarget = useMemo(() => new THREE.Vector3(), []);
   const targetRotation = useMemo(() => new THREE.Euler(), []);
   const pointerNdc = useMemo(() => new THREE.Vector2(), []);
-  const projected = useMemo(() => new THREE.Vector3(), []);
   const focusTarget = useMemo(() => new THREE.Vector3(), []);
   const focusPlanePoint = useMemo(() => new THREE.Vector3(), []);
   const focusRayDirection = useMemo(() => new THREE.Vector3(), []);
@@ -790,51 +791,44 @@ function PolaroidOrnaments({
     ) {
       selectedIndexRef.current = null;
     }
+
+    if (interactiveCount === 0) {
+      nextGrabIndexRef.current = 0;
+    } else if (nextGrabIndexRef.current >= interactiveCount) {
+      nextGrabIndexRef.current %= interactiveCount;
+    }
   }, [interactiveCount]);
+
+  useEffect(() => {
+    selectedIndexRef.current = null;
+    lastPinchingRef.current = false;
+    nextGrabIndexRef.current = 0;
+  }, [uploadedPhotos]);
 
   useFrame(({ clock }, delta) => {
     const { focusPoint, pinching } = trackingRef.current;
-    let candidateIndex: number | null = null;
-    let nearestDistance = 0.5;
+    const hasFocusPoint = Boolean(focusPoint);
 
-    if (pinching && focusPoint && interactiveCount > 0) {
+    if (focusPoint) {
       pointerNdc.set(
         THREE.MathUtils.lerp(1, -1, focusPoint.x),
         THREE.MathUtils.lerp(1, -1, focusPoint.y),
       );
-
-      if (selectedIndexRef.current !== null) {
-        projected.copy(positions.current[selectedIndexRef.current]).project(camera);
-        const stickyDistance = Math.hypot(
-          projected.x - pointerNdc.x,
-          projected.y - pointerNdc.y,
-        );
-
-        if (stickyDistance < 0.72) {
-          candidateIndex = selectedIndexRef.current;
-          nearestDistance = Math.max(stickyDistance - 0.06, 0.08);
-        }
-      }
-
-      for (let index = 0; index < interactiveCount; index += 1) {
-        projected.copy(positions.current[index]).project(camera);
-        const distance = Math.hypot(
-          projected.x - pointerNdc.x,
-          projected.y - pointerNdc.y,
-        );
-
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          candidateIndex = index;
-        }
-      }
     }
 
     if (!pinching) {
       selectedIndexRef.current = null;
-    } else if (candidateIndex !== null) {
-      selectedIndexRef.current = candidateIndex;
+    } else if (
+      interactiveCount > 0 &&
+      hasFocusPoint &&
+      (selectedIndexRef.current === null || !lastPinchingRef.current)
+    ) {
+      const nextIndex = nextGrabIndexRef.current % interactiveCount;
+      selectedIndexRef.current = nextIndex;
+      nextGrabIndexRef.current = (nextIndex + 1) % interactiveCount;
     }
+
+    lastPinchingRef.current = pinching;
 
     layout.polaroids.forEach((seed, index) => {
       tempChaos.set(...seed.chaosPosition);
