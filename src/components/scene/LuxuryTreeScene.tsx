@@ -1,10 +1,18 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  Suspense,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import * as THREE from "three";
 import { buildTreeLayout } from "../../lib/treeLayout";
 import type {
+  HandMotionData,
   OrnamentSeed,
   TreeLayoutData,
   TreeState,
@@ -69,9 +77,7 @@ const FOLIAGE_FRAGMENT_SHADER = `
 
 interface LuxuryTreeSceneProps {
   treeState: TreeState;
-  focusPoint: { x: number; y: number } | null;
-  pinching: boolean;
-  handProximity: number;
+  trackingRef: React.MutableRefObject<HandMotionData>;
   uploadedPhotos: UploadedPhotoAsset[];
 }
 
@@ -83,11 +89,9 @@ interface OrnamentClusterProps {
   wobble: number;
 }
 
-export function LuxuryTreeScene({
+export const LuxuryTreeScene = memo(function LuxuryTreeScene({
   treeState,
-  focusPoint,
-  pinching,
-  handProximity,
+  trackingRef,
   uploadedPhotos,
 }: LuxuryTreeSceneProps) {
   return (
@@ -104,21 +108,17 @@ export function LuxuryTreeScene({
       <Suspense fallback={null}>
         <LuxurySceneContent
           treeState={treeState}
-          focusPoint={focusPoint}
-          pinching={pinching}
-          handProximity={handProximity}
+          trackingRef={trackingRef}
           uploadedPhotos={uploadedPhotos}
         />
       </Suspense>
     </Canvas>
   );
-}
+});
 
 function LuxurySceneContent({
   treeState,
-  focusPoint,
-  pinching,
-  handProximity,
+  trackingRef,
   uploadedPhotos,
 }: LuxuryTreeSceneProps) {
   const progressRef = useRef(1);
@@ -136,7 +136,7 @@ function LuxurySceneContent({
 
   return (
     <>
-      <CameraRig treeState={treeState} handProximity={handProximity} />
+      <CameraRig treeState={treeState} trackingRef={trackingRef} />
 
       <ambientLight color="#d8e2d7" intensity={0.24} />
       <hemisphereLight
@@ -168,8 +168,7 @@ function LuxurySceneContent({
         <LuxuryTreeBody
           layout={layout}
           progressRef={progressRef}
-          focusPoint={focusPoint}
-          pinching={pinching}
+          trackingRef={trackingRef}
           uploadedPhotos={uploadedPhotos}
         />
       </group>
@@ -188,10 +187,10 @@ function LuxurySceneContent({
 
 function CameraRig({
   treeState,
-  handProximity,
+  trackingRef,
 }: {
   treeState: TreeState;
-  handProximity: number;
+  trackingRef: React.MutableRefObject<HandMotionData>;
 }) {
   const { camera } = useThree();
   const cameraTarget = useMemo(() => new THREE.Vector3(), []);
@@ -200,6 +199,7 @@ function CameraRig({
   const orbitVelocityRef = useRef(0.528);
 
   useFrame(({ clock }, delta) => {
+    const handProximity = trackingRef.current.handProximity;
     const chaosMix = treeState === "CHAOS" ? 1 : 0;
     const orbitRadius = THREE.MathUtils.lerp(26.6, 28.2, chaosMix);
     const baseVelocity = 0.528;
@@ -550,14 +550,12 @@ function BirthdayDecorations({
 function LuxuryTreeBody({
   layout,
   progressRef,
-  focusPoint,
-  pinching,
+  trackingRef,
   uploadedPhotos,
 }: {
   layout: TreeLayoutData;
   progressRef: React.MutableRefObject<number>;
-  focusPoint: { x: number; y: number } | null;
-  pinching: boolean;
+  trackingRef: React.MutableRefObject<HandMotionData>;
   uploadedPhotos: UploadedPhotoAsset[];
 }) {
   return (
@@ -570,8 +568,7 @@ function LuxuryTreeBody({
       <PolaroidOrnaments
         layout={layout}
         progressRef={progressRef}
-        focusPoint={focusPoint}
-        pinching={pinching}
+        trackingRef={trackingRef}
         uploadedPhotos={uploadedPhotos}
       />
       <group position={[0, 0.04, 0.26]} scale={[0.92, 0.92, 0.92]}>
@@ -742,14 +739,12 @@ function LuxuriousLights({
 function PolaroidOrnaments({
   layout,
   progressRef,
-  focusPoint,
-  pinching,
+  trackingRef,
   uploadedPhotos,
 }: {
   layout: TreeLayoutData;
   progressRef: React.MutableRefObject<number>;
-  focusPoint: { x: number; y: number } | null;
-  pinching: boolean;
+  trackingRef: React.MutableRefObject<HandMotionData>;
   uploadedPhotos: UploadedPhotoAsset[];
 }) {
   const { camera } = useThree();
@@ -798,6 +793,7 @@ function PolaroidOrnaments({
   }, [interactiveCount]);
 
   useFrame(({ clock }, delta) => {
+    const { focusPoint, pinching } = trackingRef.current;
     let candidateIndex: number | null = null;
     let nearestDistance = 0.5;
 

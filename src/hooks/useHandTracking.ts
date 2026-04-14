@@ -15,6 +15,24 @@ const OPEN_THRESHOLD = 1.88;
 const CLOSED_THRESHOLD = 1.38;
 const PINCH_ACTIVE_THRESHOLD = 0.62;
 const PINCH_RELEASE_THRESHOLD = 0.86;
+const UI_COMMIT_INTERVAL = 96;
+const FOCUS_COMMIT_EPSILON = 0.035;
+const PROXIMITY_COMMIT_EPSILON = 0.08;
+const OPENNESS_COMMIT_EPSILON = 0.12;
+const PINCH_DISTANCE_COMMIT_EPSILON = 0.05;
+
+const INITIAL_HAND_DATA: HandMotionData = {
+  hasHand: false,
+  openness: 0,
+  palm: null,
+  focusPoint: null,
+  pinchDistance: 1,
+  pinching: false,
+  handProximity: 0,
+  treeState: "FORMED",
+  ready: false,
+  error: null,
+};
 
 function averageLandmark(landmarks: Landmark[], indexes: number[]) {
   return indexes.reduce(
@@ -117,23 +135,57 @@ function formatTrackingError(error: unknown) {
   return message;
 }
 
+function shouldCommitUiState(
+  previous: HandMotionData,
+  next: HandMotionData,
+  now: number,
+  lastCommitAt: number,
+) {
+  if (
+    previous.ready !== next.ready ||
+    previous.error !== next.error ||
+    previous.hasHand !== next.hasHand ||
+    previous.treeState !== next.treeState ||
+    previous.pinching !== next.pinching
+  ) {
+    return true;
+  }
+
+  if (
+    Math.abs(previous.handProximity - next.handProximity) >
+      PROXIMITY_COMMIT_EPSILON ||
+    Math.abs(previous.openness - next.openness) > OPENNESS_COMMIT_EPSILON ||
+    Math.abs(previous.pinchDistance - next.pinchDistance) >
+      PINCH_DISTANCE_COMMIT_EPSILON
+  ) {
+    return true;
+  }
+
+  if (!previous.focusPoint || !next.focusPoint) {
+    if (previous.focusPoint !== next.focusPoint) {
+      return true;
+    }
+  } else if (
+    Math.abs(previous.focusPoint.x - next.focusPoint.x) >
+      FOCUS_COMMIT_EPSILON ||
+    Math.abs(previous.focusPoint.y - next.focusPoint.y) >
+      FOCUS_COMMIT_EPSILON
+  ) {
+    return true;
+  }
+
+  return next.hasHand && now - lastCommitAt >= UI_COMMIT_INTERVAL;
+}
+
 export function useHandTracking() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const gestureRef = useRef<TreeState>("FORMED");
   const pinchRef = useRef(false);
   const focusRef = useRef<{ x: number; y: number } | null>(null);
-  const [data, setData] = useState<HandMotionData>({
-    hasHand: false,
-    openness: 0,
-    palm: null,
-    focusPoint: null,
-    pinchDistance: 1,
-    pinching: false,
-    handProximity: 0,
-    treeState: "FORMED",
-    ready: false,
-    error: null,
-  });
+  const motionRef = useRef<HandMotionData>(INITIAL_HAND_DATA);
+  const uiSnapshotRef = useRef<HandMotionData>(INITIAL_HAND_DATA);
+  const lastUiCommitAtRef = useRef(0);
+  const [data, setData] = useState<HandMotionData>(INITIAL_HAND_DATA);
 
   useEffect(() => {
     let mounted = true;
@@ -141,12 +193,40 @@ export function useHandTracking() {
     let stream: MediaStream | null = null;
     let handLandmarker: Awaited<ReturnType<typeof createHandLandmarker>> | null = null;
 
+    const publish = (nextData: HandMotionData, force = false) => {
+      motionRef.current = nextData;
+
+      if (!mounted) {
+        return;
+      }
+
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      if (
+        force ||
+        shouldCommitUiState(
+          uiSnapshotRef.current,
+          nextData,
+          now,
+          lastUiCommitAtRef.current,
+        )
+      ) {
+        uiSnapshotRef.current = nextData;
+        lastUiCommitAtRef.current = now;
+        setData(nextData);
+      }
+    };
+
     async function startTracking() {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setData((previous) => ({
-          ...previous,
-          error: "当前浏览器不支持摄像头访问。",
-        }));
+        publish(
+          {
+            ...motionRef.current,
+            error: "当前浏览器不支持摄像头访问。",
+          },
+          true,
+        );
         return;
       }
 
@@ -174,11 +254,14 @@ export function useHandTracking() {
           return;
         }
 
-        setData((previous) => ({
-          ...previous,
-          ready: true,
-          error: null,
-        }));
+        publish(
+          {
+            ...motionRef.current,
+            ready: true,
+            error: null,
+          },
+          true,
+        );
 
         const detect = () => {
           if (!mounted || !handLandmarker || !videoRef.current) {
@@ -198,17 +281,15 @@ export function useHandTracking() {
 
           if (!result.landmarks?.length) {
             focusRef.current = null;
-            setData((previous) => ({
-              ...previous,
+            publish({
+              ...motionRef.current,
               hasHand: false,
               palm: null,
               focusPoint: null,
-              openness: previous.openness,
-              pinchDistance: previous.pinchDistance,
               pinching: false,
               handProximity: 0,
               treeState: gestureRef.current,
-            }));
+            });
             animationFrame = window.requestAnimationFrame(detect);
             return;
           }
@@ -247,7 +328,7 @@ export function useHandTracking() {
           pinchRef.current = nextPinching;
           focusRef.current = smoothedFocusPoint;
 
-          setData({
+          publish({
             hasHand: true,
             openness: analysis.openness,
             palm: analysis.palm,
@@ -265,11 +346,14 @@ export function useHandTracking() {
 
         animationFrame = window.requestAnimationFrame(detect);
       } catch (error) {
-        setData((previous) => ({
-          ...previous,
-          ready: false,
-          error: formatTrackingError(error),
-        }));
+        publish(
+          {
+            ...motionRef.current,
+            ready: false,
+            error: formatTrackingError(error),
+          },
+          true,
+        );
       }
     }
 
@@ -285,6 +369,7 @@ export function useHandTracking() {
 
   return {
     videoRef,
+    motionRef,
     ...data,
   };
 }

@@ -4,16 +4,138 @@ import { useHandTracking } from "../hooks/useHandTracking";
 import type { TreeState, UploadedPhotoAsset } from "../types/tree";
 
 const MAX_UPLOADS = 52;
+const UPLOAD_OPTIMIZATION_MAX_EDGE = 1024;
+const UPLOAD_OPTIMIZATION_CONCURRENCY = 4;
+
+async function loadImageElement(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`Unable to decode image: ${file.name}`));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function decodeUploadImage(file: File) {
+  if (typeof createImageBitmap === "function") {
+    return createImageBitmap(file);
+  }
+
+  return loadImageElement(file);
+}
+
+function getDecodedImageSize(source: HTMLImageElement | ImageBitmap) {
+  if ("naturalWidth" in source) {
+    return {
+      width: source.naturalWidth,
+      height: source.naturalHeight,
+    };
+  }
+
+  return {
+    width: source.width,
+    height: source.height,
+  };
+}
+
+function releaseDecodedImage(source: HTMLImageElement | ImageBitmap) {
+  if ("close" in source) {
+    source.close();
+  }
+}
+
+async function createOptimizedPhotoBlob(file: File) {
+  const source = await decodeUploadImage(file);
+
+  try {
+    const { width, height } = getDecodedImageSize(source);
+    const maxEdge = Math.max(width, height);
+
+    if (!maxEdge || maxEdge <= UPLOAD_OPTIMIZATION_MAX_EDGE) {
+      return null;
+    }
+
+    const scale = UPLOAD_OPTIMIZATION_MAX_EDGE / maxEdge;
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d", { alpha: false });
+
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, targetWidth, targetHeight);
+    context.drawImage(source, 0, 0, targetWidth, targetHeight);
+
+    return new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.9);
+    });
+  } finally {
+    releaseDecodedImage(source);
+  }
+}
+
+async function createUploadedPhotoAsset(file: File, index: number) {
+  const optimizedBlob = await createOptimizedPhotoBlob(file).catch(() => null);
+
+  return {
+    id: `${file.name}-${file.lastModified}-${index}`,
+    name: file.name.replace(/\.[^.]+$/, "").slice(0, 28),
+    url: URL.createObjectURL(optimizedBlob ?? file),
+  };
+}
+
+async function optimizeUploadedPhotos(files: File[]) {
+  const nextPhotos = new Array<UploadedPhotoAsset>(files.length);
+  let cursor = 0;
+  const workerCount = Math.min(UPLOAD_OPTIMIZATION_CONCURRENCY, files.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (cursor < files.length) {
+        const currentIndex = cursor;
+        cursor += 1;
+        nextPhotos[currentIndex] = await createUploadedPhotoAsset(
+          files[currentIndex],
+          currentIndex,
+        );
+      }
+    }),
+  );
+
+  return nextPhotos;
+}
 
 export function GrandLuxuryTreeExperience() {
   const tracking = useHandTracking();
   const [treeState, setTreeState] = useState<TreeState>("FORMED");
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhotoAsset[]>([]);
+  const [optimizingPhotos, setOptimizingPhotos] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadBatchRef = useRef(0);
 
   useEffect(() => {
     setTreeState(tracking.treeState);
   }, [tracking.treeState]);
+
+  useEffect(() => {
+    return () => {
+      uploadBatchRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -38,28 +160,40 @@ export function GrandLuxuryTreeExperience() {
     fileInputRef.current?.click();
   }
 
-  function handleUploadChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleUploadChange(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []).slice(0, MAX_UPLOADS);
+    event.target.value = "";
 
     if (!files.length) {
       return;
     }
 
-    const nextPhotos = files.map((file, index) => ({
-      id: `${file.name}-${file.lastModified}-${index}`,
-      name: file.name.replace(/\.[^.]+$/, "").slice(0, 28),
-      url: URL.createObjectURL(file),
-    }));
+    const batchId = uploadBatchRef.current + 1;
+    uploadBatchRef.current = batchId;
+    setOptimizingPhotos(true);
 
-    setUploadedPhotos((previous) => {
-      previous.forEach((photo) => URL.revokeObjectURL(photo.url));
-      return nextPhotos;
-    });
+    try {
+      const nextPhotos = await optimizeUploadedPhotos(files);
 
-    event.target.value = "";
+      if (uploadBatchRef.current !== batchId) {
+        nextPhotos.forEach((photo) => URL.revokeObjectURL(photo.url));
+        return;
+      }
+
+      setUploadedPhotos((previous) => {
+        previous.forEach((photo) => URL.revokeObjectURL(photo.url));
+        return nextPhotos;
+      });
+    } finally {
+      if (uploadBatchRef.current === batchId) {
+        setOptimizingPhotos(false);
+      }
+    }
   }
 
   function handleResetPhotos() {
+    uploadBatchRef.current += 1;
+    setOptimizingPhotos(false);
     setUploadedPhotos((previous) => {
       previous.forEach((photo) => URL.revokeObjectURL(photo.url));
       return [];
@@ -88,9 +222,7 @@ export function GrandLuxuryTreeExperience() {
       <div className="absolute inset-0 opacity-90">
         <LuxuryTreeScene
           treeState={treeState}
-          focusPoint={tracking.focusPoint}
-          pinching={tracking.pinching}
-          handProximity={tracking.handProximity}
+          trackingRef={tracking.motionRef}
           uploadedPhotos={uploadedPhotos}
         />
       </div>
@@ -181,9 +313,12 @@ export function GrandLuxuryTreeExperience() {
                 <button
                   type="button"
                   onClick={handleUploadClick}
-                  className="luxury-panel rounded-full border border-goldAura/30 px-5 py-3 text-xs uppercase tracking-[0.26em] text-goldBright transition hover:border-goldBright/60 hover:bg-white/5"
+                  disabled={optimizingPhotos}
+                  className={`luxury-panel rounded-full border border-goldAura/30 px-5 py-3 text-xs uppercase tracking-[0.26em] text-goldBright transition hover:border-goldBright/60 hover:bg-white/5 ${
+                    optimizingPhotos ? "cursor-wait opacity-70" : ""
+                  }`}
                 >
-                  Upload Photos
+                  {optimizingPhotos ? "Optimizing Photos" : "Upload Photos"}
                 </button>
                 <button
                   type="button"
@@ -197,6 +332,12 @@ export function GrandLuxuryTreeExperience() {
               <p className="mt-3 text-xs uppercase tracking-[0.22em] text-stone-300/58">
                 最多上传 52 张照片。重新上传会替换当前拍立得内容。
               </p>
+
+              {optimizingPhotos ? (
+                <p className="mt-3 text-sm text-goldBright/88">
+                  正在优化上传图片尺寸，保留当前观感的同时减轻解码和纹理压力。
+                </p>
+              ) : null}
 
               {tracking.error ? (
                 <p className="mt-4 text-sm text-amber-200/90">
