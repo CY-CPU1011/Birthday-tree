@@ -1,0 +1,55 @@
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --emerald-deep: #03120d;
+  --emerald-mid: #0c2d20;
+  --emerald-soft: #195b42;
+  --gold-core: #f1c56d;
+  --gold-bright: #fff4c4;
+  --gold-shadow: rgba(241, 197, 109, 0.32);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Manrope", system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 226, 151, 0.08), transparent 35%),
+    radial-gradient(circle at 15% 20%, rgba(30, 84, 62, 0.26), transparent 22%),
+    radial-gradient(circle at 80% 12%, rgba(26, 67, 50, 0.2), transparent 18%),
+    linear-gradient(180deg, #020907 0%, #03120d 32%, #020806 100%);
+  color: #f7f0db;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+.luxury-panel {
+  border: 1px solid rgba(255, 231, 166, 0.18);
+  background:
+    linear-gradient(180deg, rgba(17, 44, 32, 0.78), rgba(9, 22, 17, 0.68)),
+    linear-gradient(135deg, rgba(255, 247, 210, 0.06), transparent 34%);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 249, 220, 0.08),
+    0 0 36px rgba(241, 197, 109, 0.09);
+  backdrop-filter: blur(18px);
+}
