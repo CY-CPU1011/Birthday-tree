@@ -12,9 +12,9 @@ const MODEL_ASSET =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 const OPEN_THRESHOLD = 1.88;
-const CLOSED_THRESHOLD = 1.38;
-const PINCH_ACTIVE_THRESHOLD = 0.62;
-const PINCH_RELEASE_THRESHOLD = 0.86;
+const CLOSED_THRESHOLD = 1.22;
+const PINCH_ACTIVE_THRESHOLD = 0.82;
+const PINCH_RELEASE_THRESHOLD = 1.06;
 const UI_COMMIT_INTERVAL = 96;
 const FOCUS_COMMIT_EPSILON = 0.035;
 const PROXIMITY_COMMIT_EPSILON = 0.08;
@@ -308,17 +308,20 @@ export function useHandTracking() {
           let nextState = gestureRef.current;
           let nextPinching = pinchRef.current;
 
-          if (analysis.openness >= OPEN_THRESHOLD) {
-            nextState = "CHAOS";
-          } else if (analysis.openness <= CLOSED_THRESHOLD) {
-            nextState = "FORMED";
-          }
-
           if (analysis.pinchDistance <= PINCH_ACTIVE_THRESHOLD) {
             nextPinching = true;
           } else if (analysis.pinchDistance >= PINCH_RELEASE_THRESHOLD) {
             nextPinching = false;
           }
+
+          if (!nextPinching) {
+            if (analysis.openness >= OPEN_THRESHOLD) {
+              nextState = "CHAOS";
+            } else if (analysis.openness <= CLOSED_THRESHOLD) {
+              nextState = "FORMED";
+            }
+          }
+
           const nextHandProximity = THREEClamp(
             (analysis.palmWidth - 0.08) / 0.18,
             0,

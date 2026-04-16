@@ -285,7 +285,7 @@ export function GrandLuxuryTreeExperience() {
                   <RuleItem
                     emoji="🤏"
                     title="捏合"
-                    description="抓取并放大离手势最近的已上传照片。"
+                    description="抓取并在画面中心展示已上传照片。"
                   />
                   <RuleItem
                     emoji="📷"

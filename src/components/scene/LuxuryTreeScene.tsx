@@ -565,17 +565,17 @@ function LuxuryTreeBody({
       <LuxuriousLights layout={layout} progressRef={progressRef} />
       <GiftBoxes layout={layout} progressRef={progressRef} />
       <Baubles layout={layout} progressRef={progressRef} />
+      <group position={[0, 0.04, 0.26]} scale={[0.92, 0.92, 0.92]}>
+        <BirthdayDecorations progressRef={progressRef} />
+      </group>
+      <Topper progressRef={progressRef} />
+      <Trunk />
       <PolaroidOrnaments
         layout={layout}
         progressRef={progressRef}
         trackingRef={trackingRef}
         uploadedPhotos={uploadedPhotos}
       />
-      <group position={[0, 0.04, 0.26]} scale={[0.92, 0.92, 0.92]}>
-        <BirthdayDecorations progressRef={progressRef} />
-      </group>
-      <Topper progressRef={progressRef} />
-      <Trunk />
     </group>
   );
 }
@@ -756,6 +756,7 @@ function PolaroidOrnaments({
   const selectedIndexRef = useRef<number | null>(null);
   const lastPinchingRef = useRef(false);
   const nextGrabIndexRef = useRef(0);
+  const groupRef = useRef<THREE.Group>(null);
   const positions = useRef(
     layout.polaroids.map((seed) => new THREE.Vector3(...seed.chaosPosition)),
   );
@@ -766,11 +767,13 @@ function PolaroidOrnaments({
   const tempChaos = useMemo(() => new THREE.Vector3(), []);
   const tempTarget = useMemo(() => new THREE.Vector3(), []);
   const targetRotation = useMemo(() => new THREE.Euler(), []);
-  const pointerNdc = useMemo(() => new THREE.Vector2(), []);
   const focusTarget = useMemo(() => new THREE.Vector3(), []);
+  const focusLocalTarget = useMemo(() => new THREE.Vector3(), []);
   const focusPlanePoint = useMemo(() => new THREE.Vector3(), []);
   const focusRayDirection = useMemo(() => new THREE.Vector3(), []);
   const focusQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const focusLocalQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const parentWorldQuaternion = useMemo(() => new THREE.Quaternion(), []);
   const targetScale = useMemo(() => new THREE.Vector3(), []);
   const baseScales = useMemo(
     () => layout.polaroids.map((seed) => new THREE.Vector3(...seed.scale)),
@@ -808,13 +811,6 @@ function PolaroidOrnaments({
   useFrame(({ clock }, delta) => {
     const { focusPoint, pinching } = trackingRef.current;
     const hasFocusPoint = Boolean(focusPoint);
-
-    if (focusPoint) {
-      pointerNdc.set(
-        THREE.MathUtils.lerp(1, -1, focusPoint.x),
-        THREE.MathUtils.lerp(1, -1, focusPoint.y),
-      );
-    }
 
     if (!pinching) {
       selectedIndexRef.current = null;
@@ -869,9 +865,20 @@ function PolaroidOrnaments({
         return;
       }
 
-      if (selectedIndexRef.current === index) {
+      const grabbed = selectedIndexRef.current === index;
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      const formedMix = progressRef.current;
+      const formedScale = THREE.MathUtils.lerp(1, 0.72, formedMix);
+
+      mesh.renderOrder = grabbed ? 1001 : 0;
+      material.transparent = grabbed;
+      material.opacity = 1;
+      material.depthTest = !grabbed;
+      material.depthWrite = !grabbed;
+
+      if (grabbed) {
         const focusDepth = 8.8;
-        focusPlanePoint.set(pointerNdc.x, pointerNdc.y, 0.18).unproject(camera);
+        focusPlanePoint.set(0, 0, 0.18).unproject(camera);
         focusRayDirection
           .copy(focusPlanePoint)
           .sub(camera.position)
@@ -879,20 +886,34 @@ function PolaroidOrnaments({
         focusTarget.copy(camera.position).add(
           focusRayDirection.multiplyScalar(focusDepth),
         );
-        position.lerp(focusTarget, 1 - Math.exp(-delta * 6.8));
+        if (groupRef.current) {
+          groupRef.current.worldToLocal(focusLocalTarget.copy(focusTarget));
+        } else {
+          focusLocalTarget.copy(focusTarget);
+        }
+        position.lerp(focusLocalTarget, 1 - Math.exp(-delta * 13.5));
         mesh.position.copy(position);
 
         focusQuaternion.copy(camera.quaternion);
+        if (groupRef.current) {
+          groupRef.current.getWorldQuaternion(parentWorldQuaternion);
+          focusLocalQuaternion
+            .copy(parentWorldQuaternion)
+            .invert()
+            .multiply(focusQuaternion);
+        } else {
+          focusLocalQuaternion.copy(focusQuaternion);
+        }
         mesh.quaternion.slerp(
-          focusQuaternion,
-          1 - Math.exp(-delta * 7.4),
+          focusLocalQuaternion,
+          1 - Math.exp(-delta * 10.5),
         );
 
         targetScale.copy(baseScales[index]).multiplyScalar(2.95);
       } else {
         mesh.position.copy(position);
         mesh.rotation.copy(rotation);
-        targetScale.copy(baseScales[index]);
+        targetScale.copy(baseScales[index]).multiplyScalar(formedScale);
       }
 
       mesh.scale.lerp(targetScale, 1 - Math.exp(-delta * 7.6));
@@ -900,7 +921,7 @@ function PolaroidOrnaments({
   });
 
   return (
-    <group>
+    <group ref={groupRef}>
       {layout.polaroids.map((seed, index) => (
         <mesh
           key={seed.id}
@@ -910,16 +931,19 @@ function PolaroidOrnaments({
             }
           }}
           castShadow
-          receiveShadow
         >
-          <boxGeometry args={[1, 1, 1]} />
+          <planeGeometry args={[1, 1]} />
           <meshStandardMaterial
             map={textures[index]}
             emissiveMap={textures[index]}
             emissive="#ffffff"
-            emissiveIntensity={0.14}
+            emissiveIntensity={0.05}
             roughness={0.82}
             metalness={0.02}
+            opacity={1}
+            depthTest
+            depthWrite
+            side={THREE.DoubleSide}
             toneMapped={false}
           />
         </mesh>

@@ -214,12 +214,12 @@ export function buildTreeLayout(): TreeLayoutData {
       scaleRange: [0.16, 0.34],
       boxy: true,
     }),
-    baubles: createGroup(rng, "bauble", 760, {
+    baubles: rebalanceBaubles(createGroup(rng, "bauble", 646, {
       targetOptions: { shellBias: 0.94, heightBias: 0.8, lowerClamp: 0.04, upperClamp: 0.97 },
       colors: BAUBLE_COLORS,
       weightRange: [0.92, 1.34],
       scaleRange: [0.18, 0.76],
-    }),
+    })),
     lights: createLightSpiralGroup(rng, 180),
     polaroids: createGroup(rng, "polaroid", 52, {
       targetOptions: { shellBias: 0.92, heightBias: 0.84, lowerClamp: 0.16, upperClamp: 0.9 },
@@ -227,9 +227,60 @@ export function buildTreeLayout(): TreeLayoutData {
       weightRange: [0.72, 1.08],
       scaleRange: [1.08, 1.32],
       boxy: true,
-    }).map((seed) => ({
+    }).map((seed, index) => ({
       ...seed,
+      targetPosition: pushOutward(seed.targetPosition, getPhotoLayerOffset(index)),
       scale: [seed.scale[0] * 1.04, seed.scale[1] * 1.24, 0.08] as Vec3Tuple,
     })),
   };
+}
+
+function getPhotoLayerOffset(index: number) {
+  const offsets = [-0.34, -0.18, -0.06, 0.08, 0.22, 0.34];
+  return offsets[index % offsets.length];
+}
+
+function rebalanceBaubles(seeds: OrnamentSeed[]) {
+  return seeds.map((seed, index) => {
+    const [x, y, z] = seed.targetPosition;
+    const layer = index % 10;
+    const shouldMoveDown =
+      y > 1.7 && (layer === 0 || layer === 3 || layer === 7);
+
+    if (!shouldMoveDown) {
+      return seed;
+    }
+
+    const drop = 2.35 + ((index % 4) * 0.26);
+    const nextY = MathUtils.clamp(y - drop, -4.15, 2.4);
+    const fillLowerGap = nextY < -2.05;
+    const spread = fillLowerGap ? 1.18 : 1.08;
+
+    return {
+      ...seed,
+      targetPosition: [
+        x * spread,
+        nextY,
+        z * spread,
+      ] as Vec3Tuple,
+      scale: seed.scale.map((value) =>
+        value * (fillLowerGap ? 0.92 : 0.96),
+      ) as Vec3Tuple,
+    };
+  });
+}
+
+function pushOutward(position: Vec3Tuple, distance: number): Vec3Tuple {
+  const [x, y, z] = position;
+  const radius = Math.hypot(x, z);
+
+  if (radius < 0.001) {
+    return [x, y, z + distance];
+  }
+
+  return [
+    x + (x / radius) * distance,
+    y,
+    z + (z / radius) * distance,
+  ];
 }
