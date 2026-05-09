@@ -4,6 +4,8 @@
 
 **在线体验**: [birthday-tree-swart.vercel.app](https://birthday-tree-swart.vercel.app)
 
+![Birthday Tree preview](public/screenshots/birthday-tree-preview.png)
+
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-61DAFB?logo=react&logoColor=black)
 ![Three.js](https://img.shields.io/badge/Three.js-000000?logo=threedotjs&logoColor=white)
